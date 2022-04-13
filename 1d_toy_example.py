@@ -44,9 +44,9 @@ def gt(dim):
 
 
 def from_funct_to_matrix_cov_is_diagonal(mean_func, log_diagonal_func, dim):
-    #epsilon = 1e-4
-    #index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
-    index = torch.arange(dim).to(torch.float32)
+    epsilon = 1e-4
+    index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
+    #index = torch.arange(dim).to(torch.float32)
     index = index.unsqueeze(1)
     mean_vec = mean_func(index)
     diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(index).view(-1)))
@@ -54,9 +54,9 @@ def from_funct_to_matrix_cov_is_diagonal(mean_func, log_diagonal_func, dim):
 
 
 def from_funct_to_matrix_cov_is_low_rank(mean_func, log_diagonal_func, cov_factor_func, dim):
-    #epsilon = 1e-4
-    #index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
-    index = torch.arange(dim).to(torch.float32)
+    epsilon = 1e-4
+    index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
+    #index = torch.arange(dim).to(torch.float32)
     index = index.unsqueeze(1)
     mean_vector = mean_func(index)
     diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(index).view(-1)))
@@ -106,7 +106,7 @@ class DeepSDF(nn.Module):
         self.fc1 = nn.Linear(in_ch + latent_size, 32)
         self.fc2 = nn.Linear(32, 32)
         self.fc3 = nn.Linear(32, 32)
-        self.fc4 = nn.Linear(32, 32 - (latent_size + in_ch))
+        self.fc4 = nn.Linear(32, 32 - latent_size)
         self.fc5 = nn.Linear(32, 32)
         self.fc6 = nn.Linear(32, 32)
         self.fc7 = nn.Linear(32, 32)
@@ -118,7 +118,7 @@ class DeepSDF(nn.Module):
         x3 = F.relu(self.fc2(x2))
         x4 = F.relu(self.fc3(x3))
         x5 = F.relu(self.fc4(x4))
-        y = torch.cat((x1, x5), 1)
+        y = torch.cat((self.latent_parameter, x5), 1)
         x6 = F.relu(self.fc5(y))
         x7 = F.relu(self.fc6(x6))
         x8 = F.relu(self.fc7(x7))
@@ -134,16 +134,16 @@ def train_diagonal(t, number_pre_epochs, mean, log_diagonal, loss_function, opti
         optimizer = optimizer_m
         mean_vec, diagonal_vec = from_funct_to_matrix_cov_is_diagonal(mean, log_diagonal, dim)
         mc_samples0 = mc_sample_mean(mean_vec, dim, number_of_samples)
-        #mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
+        mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
     else:
         optimizer = optimizer_d_m
         mean_vec, diagonal_vec = from_funct_to_matrix_cov_is_diagonal(mean, log_diagonal, dim)
         mc_samples0 = mc_sample_cov_is_diagonal(mean_vec, diagonal_vec, number_of_samples)
-        #mc_samples1 = mc_sample_cov_is_diagonal(mean_vec, diagonal_vec, number_of_samples)
+        mc_samples1 = mc_sample_cov_is_diagonal(mean_vec, diagonal_vec, number_of_samples)
 
     for j in range(number_of_samples):
         log_prob[0][j] = -loss_function(mc_samples0[j], gts[0])
-        log_prob[1][j] = -loss_function(mc_samples0[j], gts[1])
+        log_prob[1][j] = -loss_function(mc_samples1[j], gts[1])
     loss = torch.mean(-torch.logsumexp(log_prob, dim=1)) + math.log(number_of_samples)
     loss_list.append(loss.item())
     optimizer.zero_grad()
