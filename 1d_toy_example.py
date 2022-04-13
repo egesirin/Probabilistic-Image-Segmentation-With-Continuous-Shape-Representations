@@ -161,17 +161,17 @@ def train_low_rank(t, number_pre_epochs, mean, log_diagonal, cov_factor, loss_fu
         mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
                                                                                          cov_factor, dim)
         mc_samples0 = mc_sample_mean(mean_vec, dim, number_of_samples)
-        #mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
+        mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
 
     else:
         optimizer = optimizer_a
         mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
                                                                                          cov_factor, dim)
         mc_samples0 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
-        #mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
+        mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
     for j in range(number_of_samples):
         log_prob[0][j] = -loss_function(mc_samples0[j], gts[0])
-        log_prob[1][j] = -loss_function(mc_samples0[j], gts[1])
+        log_prob[1][j] = -loss_function(mc_samples1[j], gts[1])
     loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
     loss_list.append(loss.item())
     optimizer.zero_grad()
