@@ -44,8 +44,9 @@ def gt(dim):
 
 
 def from_funct_to_matrix_cov_is_diagonal(mean_func, log_diagonal_func, dim):
-    epsilon = 1e-4
-    index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
+    #epsilon = 1e-4
+    #index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
+    index = torch.arange(dim).to(torch.float32)
     index = index.unsqueeze(1)
     mean_vec = mean_func(index)
     diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(index).view(-1)))
@@ -53,8 +54,9 @@ def from_funct_to_matrix_cov_is_diagonal(mean_func, log_diagonal_func, dim):
 
 
 def from_funct_to_matrix_cov_is_low_rank(mean_func, log_diagonal_func, cov_factor_func, dim):
-    epsilon = 1e-4
-    index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
+    #epsilon = 1e-4
+    #index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
+    index = torch.arange(dim).to(torch.float32)
     index = index.unsqueeze(1)
     mean_vector = mean_func(index)
     diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(index).view(-1)))
