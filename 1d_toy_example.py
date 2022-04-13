@@ -44,7 +44,8 @@ def gt(dim):
 
 
 def from_funct_to_matrix_cov_is_diagonal(mean_func, log_diagonal_func, dim):
-    index = torch.arange(dim).to(torch.float32)
+    epsilon = 1e-4
+    index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
     index = index.unsqueeze(1)
     mean_vec = mean_func(index)
     diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(index).view(-1)))
@@ -52,7 +53,8 @@ def from_funct_to_matrix_cov_is_diagonal(mean_func, log_diagonal_func, dim):
 
 
 def from_funct_to_matrix_cov_is_low_rank(mean_func, log_diagonal_func, cov_factor_func, dim):
-    index = torch.arange(dim).to(torch.float32)
+    epsilon = 1e-4
+    index = torch.arange(-dim//2, dim//2).to(torch.float32)*epsilon
     index = index.unsqueeze(1)
     mean_vector = mean_func(index)
     diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(index).view(-1)))
@@ -130,16 +132,16 @@ def train_diagonal(t, number_pre_epochs, mean, log_diagonal, loss_function, opti
         optimizer = optimizer_m
         mean_vec, diagonal_vec = from_funct_to_matrix_cov_is_diagonal(mean, log_diagonal, dim)
         mc_samples0 = mc_sample_mean(mean_vec, dim, number_of_samples)
-        mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
+        #mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
     else:
         optimizer = optimizer_d_m
         mean_vec, diagonal_vec = from_funct_to_matrix_cov_is_diagonal(mean, log_diagonal, dim)
         mc_samples0 = mc_sample_cov_is_diagonal(mean_vec, diagonal_vec, number_of_samples)
-        mc_samples1 = mc_sample_cov_is_diagonal(mean_vec, diagonal_vec, number_of_samples)
+        #mc_samples1 = mc_sample_cov_is_diagonal(mean_vec, diagonal_vec, number_of_samples)
 
     for j in range(number_of_samples):
         log_prob[0][j] = -loss_function(mc_samples0[j], gts[0])
-        log_prob[1][j] = -loss_function(mc_samples1[j], gts[1])
+        log_prob[1][j] = -loss_function(mc_samples0[j], gts[1])
     loss = torch.mean(-torch.logsumexp(log_prob, dim=1)) + math.log(number_of_samples)
     loss_list.append(loss.item())
     optimizer.zero_grad()
@@ -157,17 +159,17 @@ def train_low_rank(t, number_pre_epochs, mean, log_diagonal, cov_factor, loss_fu
         mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
                                                                                          cov_factor, dim)
         mc_samples0 = mc_sample_mean(mean_vec, dim, number_of_samples)
-        mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
+        #mc_samples1 = mc_sample_mean(mean_vec, dim, number_of_samples)
 
     else:
         optimizer = optimizer_a
         mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
                                                                                          cov_factor, dim)
         mc_samples0 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
-        mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
+        #mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
     for j in range(number_of_samples):
         log_prob[0][j] = -loss_function(mc_samples0[j], gts[0])
-        log_prob[1][j] = -loss_function(mc_samples1[j], gts[1])
+        log_prob[1][j] = -loss_function(mc_samples0[j], gts[1])
     loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
     loss_list.append(loss.item())
     optimizer.zero_grad()
