@@ -17,11 +17,12 @@ def ground_truths(n,data):
 	return gts
 
 def get_coordinates(image_shape: Iterable[int]) -> torch.Tensor:
+	epsilon = 1e-4
 	individual_voxel_ids = [torch.arange(num_elements) for num_elements in image_shape]
 	individual_voxel_ids_meshed = torch.meshgrid(individual_voxel_ids, indexing='ij')
 	voxel_ids = torch.stack(individual_voxel_ids_meshed, -1)
 	voxel_ids = voxel_ids.reshape(-1, voxel_ids.shape[-1])
-	voxel_ids = voxel_ids.to(torch.float32)
+	voxel_ids = voxel_ids.to(torch.float32)*epsilon
 	return voxel_ids
 
 
@@ -98,39 +99,47 @@ class DeepSDF(nn.Module):
 
 
 def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m, optimizer_a,
-				   number_of_samples, coords, loss_list):
+				   number_of_samples, coords):
 
 	log_prob = torch.zeros(4, number_of_samples)
 	if t <= number_pre_epochs:
 		optimizer = optimizer_m
 		mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
 																						 cov_factor, coords)
-		mc_samples = mc_sample_mean(mean_vec, number_of_samples)
+		mc_samples0 = mc_sample_mean(mean_vec, number_of_samples)
+		mc_samples1 = mc_sample_mean(mean_vec, number_of_samples)
+		mc_samples2 = mc_sample_mean(mean_vec, number_of_samples)
+		mc_samples3 = mc_sample_mean(mean_vec, number_of_samples)
 
 	else:
 		optimizer = optimizer_a
 		mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
 																						 cov_factor, coords)
-		mc_samples = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
+		mc_samples0 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
+		mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
+		mc_samples2 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
+		mc_samples3 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
 
 	for j in range(number_of_samples):
-		log_prob[0][j] = -loss_function(mc_samples[j], gts[0].view(-1))
-		log_prob[1][j] = -loss_function(mc_samples[j], gts[1].view(-1))
-		log_prob[2][j] = -loss_function(mc_samples[j], gts[2].view(-1))
-		log_prob[3][j] = -loss_function(mc_samples[j], gts[3].view(-1))
+		log_prob[0][j] = -loss_function(mc_samples0[j], gts[0].view(-1))
+		log_prob[1][j] = -loss_function(mc_samples1[j], gts[1].view(-1))
+		log_prob[2][j] = -loss_function(mc_samples2[j], gts[2].view(-1))
+		log_prob[3][j] = -loss_function(mc_samples3[j], gts[3].view(-1))
 	loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
-	loss_list.append(loss.detach().item())
+	print("epoch :",t, loss.item())
+
 	optimizer.zero_grad()
 	loss.backward()
 	optimizer.step()
 
-def show_cov_matrix(cov):
+def show_cov_matrix(cov, path, str):
 	cov = cov.detach().numpy()
 	lim = np.max(np.abs(cov))
 	plt.imshow(cov, cmap='seismic', clim=(-lim, lim))
 	cbar = plt.colorbar()
 	cbar.minorticks_on()
 	plt.show()
+	plt.savefig(path + str)
 
 
 def my_plot(t, loss):
@@ -155,6 +164,15 @@ def results_low_rank(mean_func, diagonal_func, cov_factor_func, img, coords, pat
 	plt.plot()
 	plt.savefig(path+"samples")
 
+def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path, str):
+	with torch.no_grad():
+		mean, diagonal, cov_factor = from_funct_to_matrix_cov_is_low_rank(mean_func, diagonal_func, cov_factor_func,
+																		  coords)
+		show_cov_matrix(mean,path, str)
+
+
+
+
 
 
 #latent_size = 2
@@ -168,10 +186,10 @@ gt = ground_truths(gts_index, dataset)
 dimension = ground_truths(gts_index, dataset)[0].shape
 coordinates = get_coordinates(dimension)
 learning_rate = 1e-3
-number_of_mc = 80
-pre_epochs = 1000
+number_of_mc = 20
+pre_epochs = 0
 number_epochs = 1000
-loss_values = []
+
 #print(coordinates.shape)
 #print(coordinates[0])
 #print(coordinates[16383])
@@ -183,13 +201,13 @@ parameters_all = [mean_function.parameters(), log_diagonal_function.parameters()
 optimizer_all = torch.optim.Adam(itertools.chain(*parameters_all), lr=learning_rate)
 criterion = nn.BCEWithLogitsLoss(reduction="sum")
 PATH =  '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/'
+
 def main():
 
 	for t in range(pre_epochs+number_epochs):
 		train_low_rank(t, pre_epochs,gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
-					   optimizer_mean, optimizer_all, number_of_mc, coordinates, loss_values)
+					   optimizer_mean, optimizer_all, number_of_mc, coordinates)
 
-		print("epoch : ", t, " loss : ", loss_values[-1])
 	results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, image, coordinates, PATH)
 
 
