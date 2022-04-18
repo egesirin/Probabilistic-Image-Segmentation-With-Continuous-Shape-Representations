@@ -186,9 +186,9 @@ gt = ground_truths(gts_index, dataset)
 dimension = ground_truths(gts_index, dataset)[0].shape
 coordinates = get_coordinates(dimension)
 learning_rate = 1e-3
-number_of_mc = 20
-pre_epochs = 0
-number_epochs = 1000
+number_of_mc = 10
+pre_epochs = 5000
+number_epochs = 5000
 
 #print(coordinates.shape)
 #print(coordinates[0])
