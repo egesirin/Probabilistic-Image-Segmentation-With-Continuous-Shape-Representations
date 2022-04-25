@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 data_folder = '/scratch/visual/esirin/data/'
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dataset = LIDC_IDRI(dataset_location=data_folder)
 
 def ground_truths(n,data):
@@ -26,19 +26,19 @@ def get_coordinates(image_shape: Iterable[int]) -> torch.Tensor:
 	return voxel_ids
 
 
-
-def from_funct_to_matrix_mean(mean_func, coords):
-	mean_vector = mean_func(coords)
-	return mean_vector
-
-
 def from_funct_to_matrix_cov_is_diagonal(mean_func, log_diagonal_func, coords):
+	mu = 63.5
+	sigma = 37.09
+	coords = (coords- mu)/sigma
 	mean_vector = mean_func(coords)
 	diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(coords).view(-1)))
 	return mean_vector, diagonal_matrix
 
 
 def from_funct_to_matrix_cov_is_low_rank(mean_func, log_diagonal_func, cov_factor_func, coords):
+	mu = 63.5
+	sigma = 37.09
+	coords = (coords - mu) / sigma
 	mean_vector = mean_func(coords)
 	diagonal_matrix = torch.diag(torch.exp(log_diagonal_func(coords).view(-1)))
 	cov_factor_matrix = cov_factor_func(coords)
@@ -49,8 +49,8 @@ def from_funct_to_matrix_cov_is_low_rank(mean_func, log_diagonal_func, cov_facto
 def mc_sample_mean(mean, number_of_sample):
 	mc_samples = torch.rand(number_of_sample, mean.size(0))
 	for i in range(number_of_sample):
-		mc_samples[i] = mean.view(-1)
-	return mc_samples
+		mc_samples[i] = mean.view(-1).to(device=DEVICE)
+	return mc_samples.to(device=DEVICE)
 
 
 def mc_sample_cov_is_diagonal(mean, diagonal, number_of_sample):
@@ -64,9 +64,10 @@ def mc_sample_cov_is_diagonal(mean, diagonal, number_of_sample):
 def mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, number_of_sample):
 	mc_samples = torch.rand(number_of_sample, diagonal.size(0))
 	for i in range(number_of_sample):
-		sample_d = torch.normal(0, 1, size=(diagonal.size(0),))
-		sample_p = torch.normal(0, 1, size=(cov_factor.size(1),))
-		mc_samples[i] = cov_factor @ sample_p + torch.sqrt(diagonal) @ sample_d + mean.view(-1)
+		sample_d = torch.normal(0, 1, size=(diagonal.size(0),)).to(device=DEVICE)
+		sample_p = torch.normal(0, 1, size=(cov_factor.size(1),)).to(device=DEVICE)
+		mc_samples[i] = (cov_factor @ sample_p + torch.sqrt(diagonal) @ sample_d + mean.view(-1))
+
 	return mc_samples
 
 
@@ -98,9 +99,13 @@ class DeepSDF(nn.Module):
 		return x9
 
 
+
 def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m, optimizer_a,
 				   number_of_samples, coords):
-
+	gts0 = gts[0].to(device=DEVICE)
+	gts1 = gts[1].to(device=DEVICE)
+	gts2 = gts[2].to(device=DEVICE)
+	gts3 = gts[3].to(device=DEVICE)
 	log_prob = torch.zeros(4, number_of_samples)
 	if t <= number_pre_epochs:
 		optimizer = optimizer_m
@@ -111,40 +116,30 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
 		mc_samples2 = mc_sample_mean(mean_vec, number_of_samples)
 		mc_samples3 = mc_sample_mean(mean_vec, number_of_samples)
 
+
 	else:
 		optimizer = optimizer_a
 		mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
 																						 cov_factor, coords)
-		mc_samples0 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
-		mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
-		mc_samples2 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
-		mc_samples3 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples)
+		mc_samples0 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(device=DEVICE)
+		mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
+			device=DEVICE)
+		mc_samples2 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
+			device=DEVICE)
+		mc_samples3 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
+			device=DEVICE)
+
 
 	for j in range(number_of_samples):
-		log_prob[0][j] = -loss_function(mc_samples0[j], gts[0].view(-1))
-		log_prob[1][j] = -loss_function(mc_samples1[j], gts[1].view(-1))
-		log_prob[2][j] = -loss_function(mc_samples2[j], gts[2].view(-1))
-		log_prob[3][j] = -loss_function(mc_samples3[j], gts[3].view(-1))
-	loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
+		log_prob[0][j] = -loss_function(mc_samples0[j], gts0.view(-1)).to(device=DEVICE)
+		log_prob[1][j] = -loss_function(mc_samples1[j], gts1.view(-1)).to(device=DEVICE)
+		log_prob[2][j] = -loss_function(mc_samples2[j], gts2.view(-1)).to(device=DEVICE)
+		log_prob[3][j] = -loss_function(mc_samples3[j], gts3.view(-1)).to(device=DEVICE)
+	loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples)).to(device=DEVICE)
 	print("epoch :",t, loss.item())
-
 	optimizer.zero_grad()
 	loss.backward()
 	optimizer.step()
-
-def show_cov_matrix(cov, path, str):
-	cov = cov.detach().numpy()
-	lim = np.max(np.abs(cov))
-	plt.imshow(cov, cmap='seismic', clim=(-lim, lim))
-	cbar = plt.colorbar()
-	cbar.minorticks_on()
-	plt.show()
-	plt.savefig(path + str)
-
-
-def my_plot(t, loss):
-	plt.plot(t, loss)
-	plt.show()
 
 
 def results_low_rank(mean_func, diagonal_func, cov_factor_func, img, coords, path):
@@ -153,29 +148,35 @@ def results_low_rank(mean_func, diagonal_func, cov_factor_func, img, coords, pat
 		mean, diagonal, cov_factor = from_funct_to_matrix_cov_is_low_rank(mean_func, diagonal_func, cov_factor_func,
 																		  coords)
 		mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, 14)
-		for i in range(4):
+		columns = 4
+		rows = 3
+		for i in range(1, columns * rows + 1):
 			sample_i = torch.round(torch.sigmoid(mc_samples[i]))
-			sample_i = sample_i.reshape(128,128)
+			sample_i = sample_i.reshape(128, 128)
 			sample_i = sample_i.squeeze()
 			img = img.squeeze()
-			fig.add_subplot(1, 4, i+1)
+			fig.add_subplot(rows, columns, i)
 			plt.imshow(img, cmap="gray")
 			plt.imshow(sample_i, alpha=0.4)
-	plt.plot()
-	plt.savefig(path+"samples")
+		plt.plot()
+		plt.savefig(path + "samples")
 
-def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path, str):
+
+def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
 	with torch.no_grad():
 		mean, diagonal, cov_factor = from_funct_to_matrix_cov_is_low_rank(mean_func, diagonal_func, cov_factor_func,
 																		  coords)
-		show_cov_matrix(mean,path, str)
+		mean = mean.reshape(128, 128)
+		mean = mean.cpu().detach().numpy()
+		lim = np.max(np.abs(mean))
+		plt.imshow(mean, cmap='seismic', clim=(-lim, lim))
+		cbar = plt.colorbar()
+		cbar.minorticks_on()
+		plt.plot()
+		plt.savefig(path + "mean")
 
 
 
-
-
-
-#latent_size = 2
 latent_size = 64
 in_channel = 2
 rank= 10
@@ -184,18 +185,17 @@ gts_index = 69
 image = dataset[gts_index][0]
 gt = ground_truths(gts_index, dataset)
 dimension = ground_truths(gts_index, dataset)[0].shape
-coordinates = get_coordinates(dimension)
+coordinates = get_coordinates(dimension).to(device=DEVICE)
 learning_rate = 1e-3
-number_of_mc = 10
-pre_epochs = 5000
-number_epochs = 5000
-
+number_of_mc = 20
+pre_epochs = 10
+number_epochs = 10
 #print(coordinates.shape)
 #print(coordinates[0])
 #print(coordinates[16383])
-mean_function = DeepSDF(in_channel,latent_size, 128, out_channel)
-log_diagonal_function = DeepSDF(in_channel,latent_size, 128, out_channel)
-low_rank_factor_function = DeepSDF(in_channel,latent_size, 128, rank)
+mean_function = DeepSDF(in_channel,latent_size, 128, out_channel).to(device=DEVICE)
+log_diagonal_function = DeepSDF(in_channel,latent_size, 128, out_channel).to(device=DEVICE)
+low_rank_factor_function = DeepSDF(in_channel,latent_size, 128, rank).to(device=DEVICE)
 optimizer_mean = torch.optim.Adam(mean_function.parameters(), lr=learning_rate)
 parameters_all = [mean_function.parameters(), log_diagonal_function.parameters(), low_rank_factor_function.parameters()]
 optimizer_all = torch.optim.Adam(itertools.chain(*parameters_all), lr=learning_rate)
@@ -209,6 +209,7 @@ def main():
 					   optimizer_mean, optimizer_all, number_of_mc, coordinates)
 
 	results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, image, coordinates, PATH)
+	results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, PATH)
 
 
 if __name__ == '__main__':
