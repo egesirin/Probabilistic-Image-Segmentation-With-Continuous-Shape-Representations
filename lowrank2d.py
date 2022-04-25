@@ -99,7 +99,7 @@ class DeepSDF(nn.Module):
 		return x9
 
 
-
+'''
 def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m, optimizer_a,
 				   number_of_samples, coords):
 	gts0 = gts[0].to(device=DEVICE)
@@ -140,30 +140,64 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
 	optimizer.zero_grad()
 	loss.backward()
 	optimizer.step()
+'''
+def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m, optimizer_a,
+				   number_of_samples, coords):
+	gts0 = gts[0].to(device=DEVICE)
+	gts1 = gts[1].to(device=DEVICE)
+	gts2 = gts[2].to(device=DEVICE)
+	gts3 = gts[3].to(device=DEVICE)
+	log_prob = torch.zeros(4, number_of_samples)
 
+	optimizer = optimizer_m
+	mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
+																						 cov_factor, coords)
+	mc_samples0 = mc_sample_mean(mean_vec, number_of_samples)
+	mc_samples1 = mc_sample_mean(mean_vec, number_of_samples)
+	mc_samples2 = mc_sample_mean(mean_vec, number_of_samples)
+	mc_samples3 = mc_sample_mean(mean_vec, number_of_samples)
+
+
+	for j in range(number_of_samples):
+		log_prob[0][j] = -loss_function(mc_samples0[j], gts0.view(-1)).to(device=DEVICE)
+		log_prob[1][j] = -loss_function(mc_samples1[j], gts1.view(-1)).to(device=DEVICE)
+		log_prob[2][j] = -loss_function(mc_samples2[j], gts2.view(-1)).to(device=DEVICE)
+		log_prob[3][j] = -loss_function(mc_samples3[j], gts3.view(-1)).to(device=DEVICE)
+	loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples)).to(device=DEVICE)
+	print("epoch :",t, loss.item())
+	optimizer.zero_grad()
+	loss.backward()
+	optimizer.step()
 
 def results_low_rank(mean_func, diagonal_func, cov_factor_func, img, coords, path):
 	with torch.no_grad():
-		fig = plt.figure(figsize=(40, 40), constrained_layout=False)
+		#fig = plt.figure(figsize=(40, 40), constrained_layout=True)
 		mean, diagonal, cov_factor = from_funct_to_matrix_cov_is_low_rank(mean_func, diagonal_func, cov_factor_func,
 																		  coords)
-		mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, 14)
-		columns = 4
-		rows = 3
-		for i in range(1, columns * rows + 1):
+		columns, rows = 4,3
+		figsize = [40,40]
+		fig, ax = plt.subplots(nrows=rows, ncols=columns, figsize=figsize)
+
+		mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, columns*rows)
+		for i, axi in enumerate(ax.flat):
 			sample_i = torch.round(torch.sigmoid(mc_samples[i]))
 			sample_i = sample_i.reshape(128, 128)
 			sample_i = sample_i.squeeze()
 			img = img.squeeze()
-			fig.add_subplot(rows, columns, i)
-			plt.imshow(img, cmap="gray")
-			plt.imshow(sample_i, alpha=0.4)
+			axi.imshow(img,  cmap="gray")
+			axi.imshow(sample_i, alpha=0.4)
+			rowid = i // rows
+			colid = i % columns
+			# write row/col indices as axes' title for identification
+			axi.set_title("Row:" + str(rowid) + ", Col:" + str(colid))
+		plt.tight_layout()
 		plt.plot()
 		plt.savefig(path + "samples")
 
 
 def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
 	with torch.no_grad():
+		fig = plt.figure(figsize=(40, 40), constrained_layout=True)
 		mean, diagonal, cov_factor = from_funct_to_matrix_cov_is_low_rank(mean_func, diagonal_func, cov_factor_func,
 																		  coords)
 		mean = mean.reshape(128, 128)
@@ -188,8 +222,8 @@ dimension = ground_truths(gts_index, dataset)[0].shape
 coordinates = get_coordinates(dimension).to(device=DEVICE)
 learning_rate = 1e-3
 number_of_mc = 20
-pre_epochs = 10
-number_epochs = 10
+pre_epochs = 100
+number_epochs = 0
 #print(coordinates.shape)
 #print(coordinates[0])
 #print(coordinates[16383])
@@ -208,8 +242,9 @@ def main():
 		train_low_rank(t, pre_epochs,gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
 					   optimizer_mean, optimizer_all, number_of_mc, coordinates)
 
-	results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, image, coordinates, PATH)
 	results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, PATH)
+	results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, image, coordinates, PATH)
+
 
 
 if __name__ == '__main__':
