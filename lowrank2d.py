@@ -8,6 +8,8 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+
 data_folder = '/scratch/visual/esirin/data/'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dataset = LIDC_IDRI(dataset_location=data_folder)
@@ -17,12 +19,11 @@ def ground_truths(n,data):
 	return gts
 
 def get_coordinates(image_shape: Iterable[int]) -> torch.Tensor:
-	epsilon = 1e-4
 	individual_voxel_ids = [torch.arange(num_elements) for num_elements in image_shape]
 	individual_voxel_ids_meshed = torch.meshgrid(individual_voxel_ids, indexing='ij')
 	voxel_ids = torch.stack(individual_voxel_ids_meshed, -1)
 	voxel_ids = voxel_ids.reshape(-1, voxel_ids.shape[-1])
-	voxel_ids = voxel_ids.to(torch.float32)*epsilon
+	voxel_ids = voxel_ids.to(torch.float32)
 	return voxel_ids
 
 
@@ -49,8 +50,8 @@ def from_funct_to_matrix_cov_is_low_rank(mean_func, log_diagonal_func, cov_facto
 def mc_sample_mean(mean, number_of_sample):
 	mc_samples = torch.rand(number_of_sample, mean.size(0))
 	for i in range(number_of_sample):
-		mc_samples[i] = mean.view(-1).to(device=DEVICE)
-	return mc_samples.to(device=DEVICE)
+		mc_samples[i] = mean.view(-1)
+	return mc_samples
 
 
 def mc_sample_cov_is_diagonal(mean, diagonal, number_of_sample):
@@ -67,7 +68,6 @@ def mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, number_of_sample):
 		sample_d = torch.normal(0, 1, size=(diagonal.size(0),)).to(device=DEVICE)
 		sample_p = torch.normal(0, 1, size=(cov_factor.size(1),)).to(device=DEVICE)
 		mc_samples[i] = (cov_factor @ sample_p + torch.sqrt(diagonal) @ sample_d + mean.view(-1))
-
 	return mc_samples
 
 
@@ -99,7 +99,7 @@ class DeepSDF(nn.Module):
 		return x9
 
 
-'''
+
 def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m, optimizer_a,
 				   number_of_samples, coords):
 	gts0 = gts[0].to(device=DEVICE)
@@ -111,17 +111,17 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
 		optimizer = optimizer_m
 		mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
 																						 cov_factor, coords)
-		mc_samples0 = mc_sample_mean(mean_vec, number_of_samples)
-		mc_samples1 = mc_sample_mean(mean_vec, number_of_samples)
-		mc_samples2 = mc_sample_mean(mean_vec, number_of_samples)
-		mc_samples3 = mc_sample_mean(mean_vec, number_of_samples)
 
-
+		mc_samples0 = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
+		mc_samples1 = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
+		mc_samples2 = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
+		mc_samples3 = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
 	else:
 		optimizer = optimizer_a
 		mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
 																						 cov_factor, coords)
-		mc_samples0 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(device=DEVICE)
+		mc_samples0 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
+			device=DEVICE)
 		mc_samples1 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
 			device=DEVICE)
 		mc_samples2 = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
@@ -140,45 +140,19 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
 	optimizer.zero_grad()
 	loss.backward()
 	optimizer.step()
-'''
-def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m, optimizer_a,
-				   number_of_samples, coords):
-	gts0 = gts[0].to(device=DEVICE)
-	gts1 = gts[1].to(device=DEVICE)
-	gts2 = gts[2].to(device=DEVICE)
-	gts3 = gts[3].to(device=DEVICE)
-	log_prob = torch.zeros(4, number_of_samples)
-
-	optimizer = optimizer_m
-	mean_vec, diagonal_vec, cov_factor_matrix = from_funct_to_matrix_cov_is_low_rank(mean, log_diagonal,
-																						 cov_factor, coords)
-	mc_samples0 = mc_sample_mean(mean_vec, number_of_samples)
-	mc_samples1 = mc_sample_mean(mean_vec, number_of_samples)
-	mc_samples2 = mc_sample_mean(mean_vec, number_of_samples)
-	mc_samples3 = mc_sample_mean(mean_vec, number_of_samples)
 
 
-	for j in range(number_of_samples):
-		log_prob[0][j] = -loss_function(mc_samples0[j], gts0.view(-1)).to(device=DEVICE)
-		log_prob[1][j] = -loss_function(mc_samples1[j], gts1.view(-1)).to(device=DEVICE)
-		log_prob[2][j] = -loss_function(mc_samples2[j], gts2.view(-1)).to(device=DEVICE)
-		log_prob[3][j] = -loss_function(mc_samples3[j], gts3.view(-1)).to(device=DEVICE)
-	loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples)).to(device=DEVICE)
-	print("epoch :",t, loss.item())
-	optimizer.zero_grad()
-	loss.backward()
-	optimizer.step()
+
 
 def results_low_rank(mean_func, diagonal_func, cov_factor_func, img, coords, path):
 	with torch.no_grad():
-		#fig = plt.figure(figsize=(40, 40), constrained_layout=True)
 		mean, diagonal, cov_factor = from_funct_to_matrix_cov_is_low_rank(mean_func, diagonal_func, cov_factor_func,
 																		  coords)
 		columns, rows = 4,3
 		figsize = [40,40]
 		fig, ax = plt.subplots(nrows=rows, ncols=columns, figsize=figsize)
 
-		mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, columns*rows)
+		mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, 80)
 		for i, axi in enumerate(ax.flat):
 			sample_i = torch.round(torch.sigmoid(mc_samples[i]))
 			sample_i = sample_i.reshape(128, 128)
@@ -188,7 +162,6 @@ def results_low_rank(mean_func, diagonal_func, cov_factor_func, img, coords, pat
 			axi.imshow(sample_i, alpha=0.4)
 			rowid = i // rows
 			colid = i % columns
-			# write row/col indices as axes' title for identification
 			axi.set_title("Row:" + str(rowid) + ", Col:" + str(colid))
 		plt.tight_layout()
 		plt.plot()
@@ -197,7 +170,6 @@ def results_low_rank(mean_func, diagonal_func, cov_factor_func, img, coords, pat
 
 def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
 	with torch.no_grad():
-		fig = plt.figure(figsize=(40, 40), constrained_layout=True)
 		mean, diagonal, cov_factor = from_funct_to_matrix_cov_is_low_rank(mean_func, diagonal_func, cov_factor_func,
 																		  coords)
 		mean = mean.reshape(128, 128)
@@ -222,8 +194,8 @@ dimension = ground_truths(gts_index, dataset)[0].shape
 coordinates = get_coordinates(dimension).to(device=DEVICE)
 learning_rate = 1e-3
 number_of_mc = 20
-pre_epochs = 100
-number_epochs = 0
+pre_epochs = 10
+number_epochs = 3
 #print(coordinates.shape)
 #print(coordinates[0])
 #print(coordinates[16383])
