@@ -212,7 +212,7 @@ def gen_energy_distance(mean_func, diagonal_func, cov_factor_func, coords, sampl
 	with torch.no_grad():
 		mean, diagonal, cov_factor = function_eval(mean_func, diagonal_func, cov_factor_func, coords)
 		samples1 = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num)
-		samples1 = torch.round(torch.sigmoid(samples1)).to(dtype= bool)
+		samples1 = torch.round(torch.sigmoid(samples1)).to(dtype=bool)
 		samples2 = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num)
 		samples2 = torch.round(torch.sigmoid(samples2)).to(dtype=bool)
 		distance1 = 1 - iou(samples1, samples2)
@@ -235,8 +235,8 @@ def gen_energy_distance(mean_func, diagonal_func, cov_factor_func, coords, sampl
 
 
 def main():
-	#writer_deepsdf = SummaryWriter('runs/deepsdf_30may')
-	writer_discrete = SummaryWriter('runs/discrete_7june')
+	writer_deepsdf = SummaryWriter('runs/deepsdf')
+	#writer_discrete = SummaryWriter('runs/discrete')
 	latent_size = 64
 	in_channel = 2
 	rank = 10
@@ -264,21 +264,21 @@ def main():
 	optimizer_all = torch.optim.Adam(itertools.chain(*parameters_all), lr=learning_rate)
 	criterion = nn.BCEWithLogitsLoss(reduction="sum")
 
-	PATH = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_discrete/'
-	PATH2 = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_discrete/path2/'
-	#PATH = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/'
-	#PATH2 = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/path2/'
+	#PATH = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_discrete/'
+	#PATH2 = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_discrete/path2/'
+	PATH = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/'
+	PATH2 = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/path2/'
 	
 	mean_function_disc = Disc(128, 1).to(device=DEVICE)
 	log_diagonal_function_disc = Disc(128, 1).to(device=DEVICE)
 	optimizer_mean_disc = torch.optim.Adam(mean_function_disc.parameters(), lr=learning_rate_disc)
 	low_rank_factor_function_disc = Disc(128, rank).to(device=DEVICE)
-	parameters_all_disc = [mean_function_disc.parameters(), log_diagonal_function_disc.parameters(), low_rank_factor_function_disc.parameters()]
+	parameters_all_disc = [mean_function_disc.parameters(), log_diagonal_function_disc.parameters(),
+						low_rank_factor_function_disc.parameters()]
 	optimizer_all_disc = torch.optim.Adam(itertools.chain(*parameters_all_disc), lr=learning_rate_disc)
-	'''	
 	for t in range(pre_epochs+number_epochs):
 		train_low_rank(t, pre_epochs, gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
-					   optimizer_mean, optimizer_all, number_of_mc, coordinates, writer_deepsdf)
+					optimizer_mean, optimizer_all, number_of_mc, coordinates, writer_deepsdf)
 
 	results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, PATH)
 	results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, image, coordinates, PATH)
@@ -288,8 +288,6 @@ def main():
 
 	writer_deepsdf.close()
 	'''
-
-
 	print("disc")
 	
 	for t in range(pre_epochs+number_epochs):
@@ -298,6 +296,7 @@ def main():
 	results_mean(mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc, coordinates, PATH)
 	results_low_rank(mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc, image, coordinates, PATH)
 	writer_discrete.close()
+	'''
 
 
 if __name__ == '__main__':
