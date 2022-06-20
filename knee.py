@@ -1,13 +1,12 @@
 import torch
-import numpy as np
-from torch.utils.data import Dataset
-from torch.utils.tensorboard import SummaryWriter
 import os
+import random
 import math
+import itertools
+import numpy as np
+from typing import Iterable
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Iterable
-import itertools
 import matplotlib.pyplot as plt
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -38,8 +37,19 @@ def ground_truths(dataset, n):
     return gt_list
 
 
-def get_coordinates(image_shape: Iterable[int]) -> torch.Tensor:
-    individual_voxel_ids = [torch.arange(num_elements) for num_elements in image_shape]
+def get_coordinates(image_shape: Iterable[int], upsampling_factor, downsampling_factor) -> torch.Tensor:
+    if upsampling_factor == 1 and downsampling_factor == 1:
+        individual_voxel_ids = [torch.arange(num_elements) for num_elements in image_shape]
+
+    elif upsampling_factor > 1 and downsampling_factor == 1:
+        image_shape = [num_elements * upsampling_factor for num_elements in image_shape]
+        individual_voxel_ids = [torch.arange(num_elements - 1) for num_elements in image_shape]
+        individual_voxel_ids = [el / upsampling_factor for el in individual_voxel_ids]
+    elif upsampling_factor == 1 and downsampling_factor > 1:
+        num_elements = [int(num_elements / downsampling_factor) for num_elements in image_shape]
+        individual_voxel_ids = [torch.linspace(0, x - 1, num_elements[(image_shape.index(x))]) for x in image_shape]
+    else:
+        print("either upsampling or downsampling factor is invalid!")
     individual_voxel_ids_meshed = torch.meshgrid(individual_voxel_ids, indexing='ij')
     voxel_ids = torch.stack(individual_voxel_ids_meshed, -1)
     voxel_ids = voxel_ids.reshape(-1, voxel_ids.shape[-1])
@@ -81,7 +91,7 @@ class DeepSDF(nn.Module):
         self.fc1 = nn.Linear(in_ch + latent_size, 256)
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 256)
-        self.fc4 = nn.Linear(256, 256-(in_ch+latent_size))
+        self.fc4 = nn.Linear(256, 256 - (in_ch + latent_size))
         self.fc5 = nn.Linear(256, 256)
         self.fc6 = nn.Linear(256, 256)
         self.fc7 = nn.Linear(256, 256)
@@ -111,9 +121,8 @@ class Disc(nn.Module):
         return self.latent_parameter
 
 
-
-def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m, optimizer_a,
-                   number_of_samples, coords, writer):
+def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, loss_function, optimizer_m,
+                   optimizer_a, number_of_samples, coords, writer):
     mean_vec, diagonal_vec, cov_factor_matrix = function_eval(mean, log_diagonal, cov_factor, coords)
     log_prob = torch.zeros(len(gts), number_of_samples)
     if t <= number_pre_epochs:
@@ -122,48 +131,51 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
             mc_samples = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
             for j in range(number_of_samples):
                 log_prob[i][j] = -loss_function(mc_samples[j], gts[i].view(-1)).to(device=DEVICE)
-        del mc_samples
-        loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
-        print("epoch :", t, loss.item())
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        writer.add_scalar('Training Losses/Epoch', loss.item(), global_step=t)
     else:
         optimizer = optimizer_a
         for i in range(len(gts)):
-            mc_samples = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix,
-                                                   number_of_samples).to(device=DEVICE)
+            mc_samples = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
+                device=DEVICE)
             for j in range(number_of_samples):
                 log_prob[i][j] = -loss_function(mc_samples[j], gts[i].view(-1)).to(device=DEVICE)
-        del mc_samples
+
         loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
+        cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords,
+                                                         100, gts)
+        ged = 2 * cross - gts_div - sample_div
         print("epoch :", t, loss.item())
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        writer.add_scalar('Training Losses/Epoch', loss.item(), global_step=t)
+        writer.add_scalar('cross', cross.item(), global_step=t)
+        writer.add_scalar('gts_diversity', gts_div.item(), global_step=t)
+        writer.add_scalar('sample_diversity', sample_div.item(), global_step=t)
+        writer.add_scalar('GED', ged.item(), global_step=t)
+        writer.add_scalar('Loss', loss.item(), global_step=t)
+        del mc_samples
+        del gts
 
 
-def results_low_rank(mean_func, diagonal_func, cov_factor_func, coords, path, res):
+def results_low_rank(mean_func, diagonal_func, cov_factor_func, coords, path):
     with torch.no_grad():
         mean, diagonal, cov_factor = function_eval(mean_func, diagonal_func, cov_factor_func, coords)
-        resize_num = int(math.sqrt(len(coords)))
-        columns, rows = 2, 3
+        columns, rows = 4, 3
         figsize = [40, 40]
         fig, ax = plt.subplots(nrows=rows, ncols=columns, figsize=figsize)
-        mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, columns*rows)
+
+        mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, 12)
         for i, axi in enumerate(ax.flat):
             sample_i = torch.round(torch.sigmoid(mc_samples[i]))
-            sample_i = sample_i.reshape(resize_num, resize_num)
+            sample_i = sample_i.reshape(320, 320)
             sample_i = sample_i.squeeze()
-            axi.imshow(sample_i)
+            axi.imshow(sample_i, alpha=0.4)
             rowid = i // rows
             colid = i % columns
             axi.set_title("Row:" + str(rowid) + ", Col:" + str(colid))
         plt.tight_layout()
         plt.plot()
-        plt.savefig(path + res)
+        plt.savefig(path + 'samples')
+
 
 
 def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
@@ -171,9 +183,10 @@ def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
         mean, diagonal, cov_factor = function_eval(mean_func, diagonal_func, cov_factor_func, coords)
         figx = plt.figure(figsize=(40, 40))
         mean = mean.cpu().detach()
+        reshape_size = int(math.sqrt(len(coords)))
         mean_prob = torch.round(torch.sigmoid(mean)).numpy()
-        mean_prob = mean_prob.reshape(320, 320)
-        mean = mean.numpy().reshape(320, 320)
+        mean_prob = mean_prob.reshape(reshape_size, reshape_size)
+        mean = mean.numpy().reshape(reshape_size, reshape_size)
         lim = np.max(np.abs(mean))
         figx.add_subplot(1, 2, 1)
         plt.imshow(mean_prob, cmap='seismic', clim=(-1, 1))
@@ -187,7 +200,7 @@ def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
         plt.savefig(path + "mean")
 
 
-def gt_show(ground_truth, path ,res):
+def gt_show(ground_truth, path, res):
     with torch.no_grad():
         columns, rows = 2, 2
         figsize = [40, 40]
@@ -203,13 +216,58 @@ def gt_show(ground_truth, path ,res):
         plt.savefig(path + res)
 
 
+def iou(x, y, axis=-1):
+    iou_ = (x & y).sum(axis) / (x | y).sum(axis)
+    iou_[np.isnan(iou_)] = 1.
+    return iou_
+
+
+def distance(x, y):
+    try:
+        per_class_iou = iou(x[:, None], y[None, :], axis=-2)
+    except MemoryError:
+        per_class_iou = []
+        for x_ in x:
+            per_class_iou.append(iou(np.expand_dims(x_, axis=0), y[None, :], axis=-2))
+        per_class_iou = np.concatenate(per_class_iou)
+    return 1 - per_class_iou[..., 1:].mean(-1)
+
+
+def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_factor_func, coords, sample_num, gts):
+    with torch.no_grad():
+        mean, diagonal, cov_factor = function_eval(mean_func, diagonal_func, cov_factor_func, coords)
+        if t <= number_pre_epochs:
+            samples = mc_sample_mean(mean, sample_num)
+            samples = torch.round(torch.sigmoid(samples)).numpy()
+            samples = samples.astype(np.int32)
+            samples = samples.reshape((len(samples), -1))
+        else:
+            samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num)
+            samples = torch.round(torch.sigmoid(samples)).numpy()
+            samples = samples.astype(np.int32)
+            samples = samples.reshape((len(samples), -1))
+
+        gts = np.stack(gts).astype(np.int32)
+        gts = gts.reshape((len(gts), -1))
+        eye = np.eye(2)
+        gt_dist = eye[gts].astype(bool)
+        sample_dist = eye[samples].astype(bool)
+        gts_diversity = np.mean(distance(gt_dist, gt_dist))
+        sample_diversity = np.mean(distance(sample_dist, sample_dist))
+        cross = np.mean(distance(sample_dist, gt_dist))
+        del samples
+        del gts
+        return cross, gts_diversity, sample_diversity
+
+
 def main():
-    writer = SummaryWriter('runs/kneeloss')
+    writer_deepsdf = SummaryWriter('runs/knee/deepsdf')
     knee_data_folder = '/scratch/visual/esirin/data/label_slices/'
     knee_dataset = KneeDataSet(knee_data_folder)
     gt = ground_truths(knee_dataset, 4)
-    coordinates = get_coordinates(gt[0].size()).to(device=DEVICE)
-    gt_show(gt, '/srv/public/esirin/results/model_deepsdf/knee/', 'gts')
+    coordinates = get_coordinates(gt[0].size(), 1, 1).to(device=DEVICE)
+    coordinates_2 = get_coordinates(gt[0].size(), 2, 1).to(device=DEVICE)
+    gt_show(gt, '/scratch/visual/esirin/toy_problem/results/knee/', 'gts')
     latent_size = 64
     in_channel = 2
     rank = 10
@@ -220,21 +278,24 @@ def main():
     number_epochs = 20000
     mean_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
     log_diagonal_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
-    low_rank_factor_function = DeepSDF(in_channel, latent_size,  rank).to(device=DEVICE)
+    low_rank_factor_function = DeepSDF(in_channel, latent_size, rank).to(device=DEVICE)
     optimizer_mean = torch.optim.Adam(mean_function.parameters(), lr=learning_rate)
     parameters_all = [mean_function.parameters(), log_diagonal_function.parameters(),
                       low_rank_factor_function.parameters()]
     optimizer_all = torch.optim.Adam(itertools.chain(*parameters_all), lr=learning_rate)
     criterion = nn.BCEWithLogitsLoss(reduction="sum")
-    PATH = '/srv/public/esirin/results/model_deepsdf/knee/'
+    path_discrete = '/scratch/visual/esirin/toy_problem/results/knee/discrete/'
+    path_deepsdf = '/scratch/visual/esirin/toy_problem/results/knee/deepsdf/normal_resolution/'
+    path_deepsdf_high_resol = '/scratch/visual/esirin/toy_problem/results/knee/deepsdf/high_resolution/'
     for t in range(pre_epochs + number_epochs):
         train_low_rank(t, pre_epochs, gt, mean_function, log_diagonal_function, low_rank_factor_function,
-                       criterion, optimizer_mean, optimizer_all, number_of_mc, coordinates, writer)
-    writer.close()
+                       criterion, optimizer_mean, optimizer_all, number_of_mc, coordinates, writer_deepsdf)
+    writer_deepsdf.close()
     torch.cuda.empty_cache()
-    results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, PATH)
-    results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, PATH, "samples1")
-    results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, PATH, "samples2")
+    results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, path_deepsdf)
+    results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, path_deepsdf)
+    results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates_2, path_deepsdf_high_resol)
+    results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, coordinates_2, path_deepsdf_high_resol)
 
 
 if __name__ == '__main__':
