@@ -133,7 +133,7 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
         for i in range(len(gts)):
             mc_samples = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
             for j in range(number_of_samples):
-                gt =  gts[i].view(-1).to(device=DEVICE)
+                gt = gts[i].view(-1).to(device=DEVICE)
                 log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
     else:
         optimizer = optimizer_a
@@ -144,21 +144,21 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
                 gt = gts[i].view(-1).to(device=DEVICE)
                 log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
 
-        loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
-        cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords,
-                                                         10, gts)
-        ged = 2 * cross - gts_div - sample_div
-        print("epoch :", t, loss.item())
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        writer.add_scalar('cross', cross.item(), global_step=t)
-        writer.add_scalar('gts_diversity', gts_div.item(), global_step=t)
-        writer.add_scalar('sample_diversity', sample_div.item(), global_step=t)
-        writer.add_scalar('GED', ged.item(), global_step=t)
-        writer.add_scalar('Loss', loss.item(), global_step=t)
-        del mc_samples
-        del gts
+    loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
+    cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords, 20,
+                                                     gts)
+    ged = 2 * cross - gts_div - sample_div
+    print("epoch :", t, loss.item())
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    writer.add_scalar('cross', cross.item(), global_step=t)
+    writer.add_scalar('gts_diversity', gts_div.item(), global_step=t)
+    writer.add_scalar('sample_diversity', sample_div.item(), global_step=t)
+    writer.add_scalar('GED', ged.item(), global_step=t)
+    writer.add_scalar('Loss', loss.item(), global_step=t)
+    del mc_samples
+    del gts
 
 
 def results_low_rank(mean_func, diagonal_func, cov_factor_func, coords, path):
@@ -210,7 +210,6 @@ def gt_show(ground_truth, path, res):
         columns, rows = 2, 2
         figsize = [40, 40]
         fig, ax = plt.subplots(nrows=rows, ncols=columns, figsize=figsize)
-
         for i, axi in enumerate(ax.flat):
             axi.imshow(ground_truth[i].cpu().detach())
             rowid = i // rows
@@ -278,8 +277,8 @@ def main():
     out_channel = 1
     learning_rate = 1e-4
     number_of_mc = 20
-    pre_epochs = 10
-    number_epochs = 10
+    pre_epochs = 100
+    number_epochs = 100
     mean_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
     log_diagonal_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
     low_rank_factor_function = DeepSDF(in_channel, latent_size, rank).to(device=DEVICE)
