@@ -8,6 +8,9 @@ from typing import Iterable
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import Dataset
+
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -33,7 +36,7 @@ class KneeDataSet(Dataset):
 def ground_truths(dataset, n):
     gt_list = []
     for i in range(n):
-        gt_list.append(dataset[i].to(device=DEVICE))
+        gt_list.append(dataset[i])
     return gt_list
 
 
@@ -130,18 +133,20 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
         for i in range(len(gts)):
             mc_samples = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
             for j in range(number_of_samples):
-                log_prob[i][j] = -loss_function(mc_samples[j], gts[i].view(-1)).to(device=DEVICE)
+                gt =  gts[i].view(-1).to(device=DEVICE)
+                log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
     else:
         optimizer = optimizer_a
         for i in range(len(gts)):
             mc_samples = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
                 device=DEVICE)
             for j in range(number_of_samples):
-                log_prob[i][j] = -loss_function(mc_samples[j], gts[i].view(-1)).to(device=DEVICE)
+                gt = gts[i].view(-1).to(device=DEVICE)
+                log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
 
         loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
         cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords,
-                                                         100, gts)
+                                                         10, gts)
         ged = 2 * cross - gts_div - sample_div
         print("epoch :", t, loss.item())
         optimizer.zero_grad()
@@ -162,11 +167,12 @@ def results_low_rank(mean_func, diagonal_func, cov_factor_func, coords, path):
         columns, rows = 4, 3
         figsize = [40, 40]
         fig, ax = plt.subplots(nrows=rows, ncols=columns, figsize=figsize)
+        reshape_size = int(math.sqrt(len(coords)))
 
         mc_samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, 12)
         for i, axi in enumerate(ax.flat):
             sample_i = torch.round(torch.sigmoid(mc_samples[i]))
-            sample_i = sample_i.reshape(320, 320)
+            sample_i = sample_i.reshape(reshape_size, reshape_size)
             sample_i = sample_i.squeeze()
             axi.imshow(sample_i, alpha=0.4)
             rowid = i // rows
@@ -175,7 +181,6 @@ def results_low_rank(mean_func, diagonal_func, cov_factor_func, coords, path):
         plt.tight_layout()
         plt.plot()
         plt.savefig(path + 'samples')
-
 
 
 def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
@@ -246,7 +251,6 @@ def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_fact
             samples = torch.round(torch.sigmoid(samples)).numpy()
             samples = samples.astype(np.int32)
             samples = samples.reshape((len(samples), -1))
-
         gts = np.stack(gts).astype(np.int32)
         gts = gts.reshape((len(gts), -1))
         eye = np.eye(2)
@@ -274,8 +278,8 @@ def main():
     out_channel = 1
     learning_rate = 1e-4
     number_of_mc = 20
-    pre_epochs = 20000
-    number_epochs = 20000
+    pre_epochs = 10
+    number_epochs = 10
     mean_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
     log_diagonal_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
     low_rank_factor_function = DeepSDF(in_channel, latent_size, rank).to(device=DEVICE)
