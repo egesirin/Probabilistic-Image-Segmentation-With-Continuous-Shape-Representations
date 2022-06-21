@@ -36,7 +36,7 @@ class KneeDataSet(Dataset):
 def ground_truths(dataset, n):
     gt_list = []
     for i in range(n):
-        gt_list.append(dataset[i])
+        gt_list.append(dataset[i].to(device=DEVICE))
     return gt_list
 
 
@@ -133,7 +133,7 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
         for i in range(len(gts)):
             mc_samples = mc_sample_mean(mean_vec, number_of_samples).to(device=DEVICE)
             for j in range(number_of_samples):
-                gt = gts[i].view(-1).to(device=DEVICE)
+                gt = gts[i].view(-1)
                 log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
     else:
         optimizer = optimizer_a
@@ -141,11 +141,11 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
             mc_samples = mc_sample_cov_is_low_rank(mean_vec, diagonal_vec, cov_factor_matrix, number_of_samples).to(
                 device=DEVICE)
             for j in range(number_of_samples):
-                gt = gts[i].view(-1).to(device=DEVICE)
+                gt = gts[i].view(-1)
                 log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
 
     loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
-    cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords, 20,
+    cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords, 50,
                                                      gts)
     ged = 2 * cross - gts_div - sample_div
     print("epoch :", t, loss.item())
@@ -222,7 +222,7 @@ def gt_show(ground_truth, path, res):
 
 def iou(x, y, axis=-1):
     iou_ = (x & y).sum(axis) / (x | y).sum(axis)
-    iou_[np.isnan(iou_)] = 1.
+    iou_[torch.isnan(iou_)] = 1.
     return iou_
 
 
@@ -232,8 +232,8 @@ def distance(x, y):
     except MemoryError:
         per_class_iou = []
         for x_ in x:
-            per_class_iou.append(iou(np.expand_dims(x_, axis=0), y[None, :], axis=-2))
-        per_class_iou = np.concatenate(per_class_iou)
+            per_class_iou.append(iou(torch.unsqueeze(x_, dim=0), y[None, :], axis=-2))
+        per_class_iou = torch.cat(per_class_iou)
     return 1 - per_class_iou[..., 1:].mean(-1)
 
 
@@ -241,30 +241,30 @@ def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_fact
     with torch.no_grad():
         mean, diagonal, cov_factor = function_eval(mean_func, diagonal_func, cov_factor_func, coords)
         if t <= number_pre_epochs:
-            samples = mc_sample_mean(mean, sample_num)
-            samples = torch.round(torch.sigmoid(samples)).numpy()
-            samples = samples.astype(np.int32)
+            samples = mc_sample_mean(mean, sample_num).to(device=DEVICE)
+            samples = torch.round(torch.sigmoid(samples)).to(dtype=int)
+           # samples = samples.astype(np.uint8)
             samples = samples.reshape((len(samples), -1))
         else:
-            samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num)
-            samples = torch.round(torch.sigmoid(samples)).numpy()
-            samples = samples.astype(np.int32)
+            samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num).to(device=DEVICE)
+            samples = torch.round(torch.sigmoid(samples)).to(dtype=int)
+            #samples = samples.astype(np.uint8)
             samples = samples.reshape((len(samples), -1))
-        gts = np.stack(gts).astype(np.int32)
+        gts = torch.stack(gts).to(dtype=int)
         gts = gts.reshape((len(gts), -1))
-        eye = np.eye(2)
-        gt_dist = eye[gts].astype(bool)
-        sample_dist = eye[samples].astype(bool)
-        gts_diversity = np.mean(distance(gt_dist, gt_dist))
-        sample_diversity = np.mean(distance(sample_dist, sample_dist))
-        cross = np.mean(distance(sample_dist, gt_dist))
+        eye = torch.eye(2)
+        gt_dist = eye[gts].to(dtype=bool)
+        sample_dist = eye[samples].to(dtype=bool)
+        gts_diversity = torch.mean(distance(gt_dist, gt_dist))
+        sample_diversity = torch.mean(distance(sample_dist, sample_dist))
+        cross = torch.mean(distance(sample_dist, gt_dist))
         del samples
         del gts
         return cross, gts_diversity, sample_diversity
 
 
 def main():
-    writer_deepsdf = SummaryWriter('runs/knee/deepsdf')
+    writer_deepsdf = SummaryWriter('runs/knee/deepsdf_torch')
     knee_data_folder = '/scratch/visual/esirin/data/label_slices/'
     knee_dataset = KneeDataSet(knee_data_folder)
     gt = ground_truths(knee_dataset, 4)
@@ -277,8 +277,8 @@ def main():
     out_channel = 1
     learning_rate = 1e-4
     number_of_mc = 20
-    pre_epochs = 100
-    number_epochs = 100
+    pre_epochs = 10000
+    number_epochs = 10000
     mean_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
     log_diagonal_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
     low_rank_factor_function = DeepSDF(in_channel, latent_size, rank).to(device=DEVICE)
