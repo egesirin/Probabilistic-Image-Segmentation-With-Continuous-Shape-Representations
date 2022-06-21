@@ -130,8 +130,7 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
                 log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
 
     loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
-    cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords, 100,
-                                                     gts)
+    cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords, 100,gts)
     ged = 2*cross - gts_div - sample_div
     print("epoch :", t, loss.item())
     optimizer.zero_grad()
@@ -212,7 +211,7 @@ def results_mean(mean_func, diagonal_func, cov_factor_func, coords, path):
 
 def iou(x, y, axis=-1):
     iou_ = (x & y).sum(axis) / (x | y).sum(axis)
-    iou_[np.isnan(iou_)] = 1.
+    iou_[torch.isnan(iou_)] = 1.
     return iou_
 
 
@@ -222,8 +221,8 @@ def distance(x, y):
     except MemoryError:
         per_class_iou = []
         for x_ in x:
-            per_class_iou.append(iou(np.expand_dims(x_, axis=0), y[None, :], axis=-2))
-        per_class_iou = np.concatenate(per_class_iou)
+            per_class_iou.append(iou(torch.unsqueeze(x_, dim=0), y[None, :], axis=-2))
+        per_class_iou = torch.cat(per_class_iou)
     return 1 - per_class_iou[..., 1:].mean(-1)
 
 
@@ -231,31 +230,31 @@ def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_fact
     with torch.no_grad():
         mean, diagonal, cov_factor = function_eval(mean_func, diagonal_func, cov_factor_func, coords)
         if t <= number_pre_epochs:
-            samples = mc_sample_mean(mean, sample_num)
-            samples = torch.round(torch.sigmoid(samples)).numpy()
-            samples = samples.astype(np.int32)
+            samples = mc_sample_mean(mean, sample_num).to(device=DEVICE)
+            samples = torch.round(torch.sigmoid(samples)).to(dtype=int)
+            #samples = samples.astype(np.int32)
             samples = samples.reshape((len(samples), -1))
         else:
-            samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num)
-            samples = torch.round(torch.sigmoid(samples)).numpy()
-            samples = samples.astype(np.int32)
+            samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num).to(device=DEVICE)
+            samples = torch.round(torch.sigmoid(samples)).to(dtype=int)
+            #samples = samples.astype(np.int32)
             samples = samples.reshape((len(samples), -1))
 
-        gts = np.stack(gts_list).astype(np.int32)
+        gts = torch.stack(gts_list).to(dtype=int)
         gts = gts.reshape((len(gts), -1))
-        eye = np.eye(2)
-        gt_dist = eye[gts].astype(bool)
-        sample_dist = eye[samples].astype(bool)
-        gts_diversity = np.mean(distance(gt_dist, gt_dist))
-        sample_diversity = np.mean(distance(sample_dist, sample_dist))
-        cross = np.mean(distance(sample_dist, gt_dist))
+        eye = torch.eye(2)
+        gt_dist = eye[gts].to(dtype=bool)
+        sample_dist = eye[samples].to(dtype=bool)
+        gts_diversity = torch.mean(distance(gt_dist, gt_dist))
+        sample_diversity = torch.mean(distance(sample_dist, sample_dist))
+        cross = torch.mean(distance(sample_dist, gt_dist))
         del samples
         del gts
         return cross, gts_diversity, sample_diversity
 
 
 def main():
-    writer_deepsdf = SummaryWriter('runs/deepsdf')
+    writer_deepsdf = SummaryWriter('runs/deepsdf_torch')
     latent_size = 64
     in_channel = 2
     rank = 10
@@ -270,8 +269,8 @@ def main():
     learning_rate_disc = 1e-3
     learning_rate = 1e-4
     number_of_mc = 20
-    pre_epochs = 50
-    number_epochs = 50
+    pre_epochs = 10000
+    number_epochs = 10000
     path_discrete = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_discrete/'
     path_deepsdf = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/'
     path_deepsdf_high_resol = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/high_resol/'
@@ -294,15 +293,16 @@ def main():
     for t in range(pre_epochs + number_epochs):
         train_low_rank(t, pre_epochs, gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
                        optimizer_mean, optimizer_all, number_of_mc, coordinates, writer_deepsdf)
-    '''
+
     results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, path_deepsdf)
     results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, image, coordinates, path_deepsdf)
     results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates_2, path_deepsdf_high_resol)
     results_low_rank_upsampled(mean_function, log_diagonal_function, low_rank_factor_function, coordinates_2,
                                path_deepsdf_high_resol)
     writer_deepsdf.close()
+
     print("Discrete")
-    writer_discrete = SummaryWriter('runs/discrete')
+    writer_discrete = SummaryWriter('runs/discrete_torch')
     for t in range(pre_epochs+number_epochs):
         train_low_rank(t, pre_epochs, gt, mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc,
                        criterion, optimizer_mean_disc, optimizer_all_disc, number_of_mc, coordinates, writer_discrete)
@@ -311,7 +311,6 @@ def main():
     results_low_rank(mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc, image, coordinates,
                      path_discrete)
     writer_discrete.close()
-    '''
 
 
 if __name__ == '__main__':
