@@ -136,11 +136,12 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    writer.add_scalar('cross', cross.item(), global_step=t)
-    writer.add_scalar('gts_diversity', gts_div.item(), global_step=t)
-    writer.add_scalar('sample_diversity', sample_div.item(), global_step=t)
-    writer.add_scalar('GED', ged.item(), global_step=t)
-    writer.add_scalar('Loss', loss.item(), global_step=t)
+    if t % 50 == 0:
+        writer.add_scalar('cross', cross.item(), global_step=t)
+        writer.add_scalar('gts_diversity', gts_div.item(), global_step=t)
+        writer.add_scalar('sample_diversity', sample_div.item(), global_step=t)
+        writer.add_scalar('GED', ged.item(), global_step=t)
+        writer.add_scalar('Loss', loss.item(), global_step=t)
     del mc_samples
     del gt
 
@@ -231,19 +232,25 @@ def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_fact
         mean, diagonal, cov_factor = function_eval(mean_func, diagonal_func, cov_factor_func, coords)
         if t <= number_pre_epochs:
             samples = mc_sample_mean(mean, sample_num).to(device=DEVICE)
-            samples = torch.round(torch.sigmoid(samples)).to(dtype=int)
+            samples = torch.round(torch.sigmoid(samples)).to(dtype=torch.long)
             #samples = samples.astype(np.int32)
             samples = samples.reshape((len(samples), -1))
         else:
             samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num).to(device=DEVICE)
-            samples = torch.round(torch.sigmoid(samples)).to(dtype=int)
+            samples = torch.round(torch.sigmoid(samples)).to(dtype=torch.long)
+            #print(samples)
             #samples = samples.astype(np.int32)
             samples = samples.reshape((len(samples), -1))
+            #a = torch.where(samples < 0, samples, 0)
+            #b = torch.nonzero(a)
+            #print(samples[b])
+            #print(samples)
 
-        gts = torch.stack(gts_list).to(dtype=int)
+        gts = torch.stack(gts_list).to(dtype=torch.long)
         gts = gts.reshape((len(gts), -1))
         eye = torch.eye(2)
         gt_dist = eye[gts].to(dtype=bool)
+        #print(samples.shape) torch.Size([100, 16384])
         sample_dist = eye[samples].to(dtype=bool)
         gts_diversity = torch.mean(distance(gt_dist, gt_dist))
         sample_diversity = torch.mean(distance(sample_dist, sample_dist))
@@ -254,7 +261,8 @@ def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_fact
 
 
 def main():
-    writer_deepsdf = SummaryWriter('runs/deepsdf_torch')
+    writer_deepsdf = SummaryWriter('runs/lcdi/deepsdf')
+    writer_discrete = SummaryWriter('runs/lcdi/discrete')
     latent_size = 64
     in_channel = 2
     rank = 10
@@ -269,8 +277,8 @@ def main():
     learning_rate_disc = 1e-3
     learning_rate = 1e-4
     number_of_mc = 20
-    pre_epochs = 10000
-    number_epochs = 10000
+    pre_epochs = 20000
+    number_epochs = 20000
     path_discrete = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_discrete/'
     path_deepsdf = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/'
     path_deepsdf_high_resol = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/high_resol/'
@@ -290,27 +298,27 @@ def main():
     parameters_all_disc = [mean_function_disc.parameters(), log_diagonal_function_disc.parameters(),
                            low_rank_factor_function_disc.parameters()]
     optimizer_all_disc = torch.optim.Adam(itertools.chain(*parameters_all_disc), lr=learning_rate_disc)
+
     for t in range(pre_epochs + number_epochs):
         train_low_rank(t, pre_epochs, gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
                        optimizer_mean, optimizer_all, number_of_mc, coordinates, writer_deepsdf)
-
-    results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates, path_deepsdf)
-    results_low_rank(mean_function, log_diagonal_function, low_rank_factor_function, image, coordinates, path_deepsdf)
-    results_mean(mean_function, log_diagonal_function, low_rank_factor_function, coordinates_2, path_deepsdf_high_resol)
-    results_low_rank_upsampled(mean_function, log_diagonal_function, low_rank_factor_function, coordinates_2,
-                               path_deepsdf_high_resol)
-    writer_deepsdf.close()
-
-    print("Discrete")
-    writer_discrete = SummaryWriter('runs/discrete_torch')
-    for t in range(pre_epochs+number_epochs):
         train_low_rank(t, pre_epochs, gt, mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc,
                        criterion, optimizer_mean_disc, optimizer_all_disc, number_of_mc, coordinates, writer_discrete)
-    results_mean(mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc, coordinates,
-                 path_discrete)
-    results_low_rank(mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc, image, coordinates,
-                     path_discrete)
+    writer_deepsdf.close()
     writer_discrete.close()
+    model_path = "models.pt"
+    torch.save({
+        'mean_function_state_dict': mean_function.state_dict(),
+        'log_diagonal_function_state_dict': log_diagonal_function.state_dict(),
+        'cov_factor_function_dict': low_rank_factor_function.state_dict(),
+        'mean_disc_state_dict': mean_function_disc.state_dict(),
+        'log_diagonal_disc_state_dict': log_diagonal_function_disc.state_dict(),
+        'cov_factor_disc_dict': low_rank_factor_function_disc.state_dict(),
+        'optimizer_mean_state_dict': optimizer_mean.state_dict(),
+        'optimizer_all_state_dict': optimizer_all.state_dict(),
+        'optimizer_mean_disc_state_dict': optimizer_mean_disc.state_dict(),
+        'optimizer_all_disc_state_dict': optimizer_all_disc.state_dict(),
+    }, model_path)
 
 
 if __name__ == '__main__':
