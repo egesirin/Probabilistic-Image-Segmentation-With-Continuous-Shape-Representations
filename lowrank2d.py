@@ -8,6 +8,7 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
+import argparse
 
 # data_folder = '/srv/public/esirin/data/'
 data_folder = '/scratch/visual/esirin/data/'
@@ -47,7 +48,9 @@ def function_eval(mean_func, log_diagonal_func, cov_factor_func, coords):
     sigma = 37.09
     coords = (coords - mu) / sigma
     mean_vector = mean_func(coords)
-    diagonal_matrix = torch.exp(log_diagonal_func(coords).view(-1))
+    diagonal = log_diagonal_func(coords)
+    #print(torch.any(torch.isnan(diagonal)))
+    diagonal_matrix = torch.exp(diagonal.view(-1))
     cov_factor_matrix = cov_factor_func(coords)
     return mean_vector, diagonal_matrix, cov_factor_matrix
 
@@ -87,7 +90,6 @@ class DeepSDF(nn.Module):
         x1 = torch.cat((x, latent_vec), 1)
         x2 = F.relu(self.fc1(x1))
         x3 = F.relu(self.fc2(x2))
-
         x4 = F.relu(self.fc3(x3))
         x5 = F.relu(self.fc4(x4))
         y = torch.cat((x1, x5), 1)
@@ -128,15 +130,15 @@ def train_low_rank(t, number_pre_epochs, gts, mean, log_diagonal, cov_factor, lo
             gt = gts[i].view(-1).to(device=DEVICE)
             for j in range(number_of_samples):
                 log_prob[i][j] = -loss_function(mc_samples[j], gt).to(device=DEVICE)
-
     loss = torch.mean(-torch.logsumexp(log_prob, dim=1) + math.log(number_of_samples))
-    cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords, 100,gts)
-    ged = 2*cross - gts_div - sample_div
     print("epoch :", t, loss.item())
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     if t % 50 == 0:
+        cross, gts_div, sample_div = gen_energy_distance(t, number_pre_epochs, mean, log_diagonal, cov_factor, coords,
+                                                         100, gts)
+        ged = 2 * cross - gts_div - sample_div
         writer.add_scalar('cross', cross.item(), global_step=t)
         writer.add_scalar('gts_diversity', gts_div.item(), global_step=t)
         writer.add_scalar('sample_diversity', sample_div.item(), global_step=t)
@@ -233,24 +235,15 @@ def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_fact
         if t <= number_pre_epochs:
             samples = mc_sample_mean(mean, sample_num).to(device=DEVICE)
             samples = torch.round(torch.sigmoid(samples)).to(dtype=torch.long)
-            #samples = samples.astype(np.int32)
             samples = samples.reshape((len(samples), -1))
         else:
             samples = mc_sample_cov_is_low_rank(mean, diagonal, cov_factor, sample_num).to(device=DEVICE)
             samples = torch.round(torch.sigmoid(samples)).to(dtype=torch.long)
-            #print(samples)
-            #samples = samples.astype(np.int32)
             samples = samples.reshape((len(samples), -1))
-            #a = torch.where(samples < 0, samples, 0)
-            #b = torch.nonzero(a)
-            #print(samples[b])
-            #print(samples)
-
         gts = torch.stack(gts_list).to(dtype=torch.long)
         gts = gts.reshape((len(gts), -1))
         eye = torch.eye(2)
         gt_dist = eye[gts].to(dtype=bool)
-        #print(samples.shape) torch.Size([100, 16384])
         sample_dist = eye[samples].to(dtype=bool)
         gts_diversity = torch.mean(distance(gt_dist, gt_dist))
         sample_diversity = torch.mean(distance(sample_dist, sample_dist))
@@ -261,64 +254,84 @@ def gen_energy_distance(t, number_pre_epochs, mean_func, diagonal_func, cov_fact
 
 
 def main():
-    writer_deepsdf = SummaryWriter('runs/lcdi/deepsdf')
-    writer_discrete = SummaryWriter('runs/lcdi/discrete')
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", required=True, type=str, help="model type")
+    ap.add_argument("--lr", required=True, type=float, help="learning rate")
+    model = ap.parse_args().model
+    lr = ap.parse_args().lr
     latent_size = 64
     in_channel = 2
     rank = 10
     out_channel = 1
     gts_index = 355
-    image = dataset[gts_index][0]
+    #image = dataset[gts_index][0]
     gt = ground_truths(gts_index, dataset)
     dimension = ground_truths(gts_index, dataset)[0].shape
     coordinates = get_coordinates(dimension, 1, 1).to(device=DEVICE)
-    # print(len(coordinates))
-    coordinates_2 = get_coordinates(dimension, 2, 1).to(device=DEVICE)
-    learning_rate_disc = 1e-3
-    learning_rate = 1e-4
+    #coordinates_2 = get_coordinates(dimension, 2, 1).to(device=DEVICE)
     number_of_mc = 20
     pre_epochs = 20000
     number_epochs = 20000
-    path_discrete = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_discrete/'
-    path_deepsdf = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/'
-    path_deepsdf_high_resol = '/scratch/visual/esirin/toy_problem/results/2d_lowrank_deepsdf/high_resol/'
-    mean_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
-    log_diagonal_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
-    low_rank_factor_function = DeepSDF(in_channel, latent_size, rank).to(device=DEVICE)
-    optimizer_mean = torch.optim.Adam(mean_function.parameters(), lr=learning_rate)
-    parameters_all = [mean_function.parameters(), log_diagonal_function.parameters(),
-                      low_rank_factor_function.parameters()]
-    optimizer_all = torch.optim.Adam(itertools.chain(*parameters_all), lr=learning_rate)
-    criterion = nn.BCEWithLogitsLoss(reduction="sum")
+    if model == "discrete":
+        if lr == 1e-3:
+            learning_rate = "_original"
+        elif lr == 1e-4:
+            learning_rate = "_slower"
+        else:
+            learning_rate = str(lr)
+        writer = SummaryWriter('runs/lcdi/'+model+learning_rate)
+        mean_function = Disc(128, 1).to(device=DEVICE)
+        log_diagonal_function = Disc(128, 1).to(device=DEVICE)
+        optimizer_mean = torch.optim.Adam(mean_function.parameters(), lr=lr)
+        low_rank_factor_function = Disc(128, rank).to(device=DEVICE)
+        parameters_all = [mean_function.parameters(), log_diagonal_function.parameters(),
+                          low_rank_factor_function.parameters()]
+        optimizer_all = torch.optim.Adam(itertools.chain(*parameters_all), lr=lr)
+        criterion = nn.BCEWithLogitsLoss(reduction="sum")
+        for t in range(pre_epochs + number_epochs):
+            train_low_rank(t, pre_epochs, gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
+                           optimizer_mean, optimizer_all, number_of_mc, coordinates, writer)
+        writer.close()
+        model_path = model+learning_rate+".pt"
+        torch.save({
+            'mean_function_state_dict': mean_function.state_dict(),
+            'log_diagonal_function_state_dict': log_diagonal_function.state_dict(),
+            'cov_factor_function_dict': low_rank_factor_function.state_dict(),
+            'optimizer_mean_state_dict': optimizer_mean.state_dict(),
+            'optimizer_all_state_dict': optimizer_all.state_dict(),
+        }, model_path)
 
-    mean_function_disc = Disc(128, 1).to(device=DEVICE)
-    log_diagonal_function_disc = Disc(128, 1).to(device=DEVICE)
-    optimizer_mean_disc = torch.optim.Adam(mean_function_disc.parameters(), lr=learning_rate_disc)
-    low_rank_factor_function_disc = Disc(128, rank).to(device=DEVICE)
-    parameters_all_disc = [mean_function_disc.parameters(), log_diagonal_function_disc.parameters(),
-                           low_rank_factor_function_disc.parameters()]
-    optimizer_all_disc = torch.optim.Adam(itertools.chain(*parameters_all_disc), lr=learning_rate_disc)
+    elif model == "deepSDF":
+        if lr == 1e-3:
+            learning_rate = "_original"
+        elif lr == 1e-4:
+            learning_rate = "_slower"
+        else:
+            learning_rate = str(lr)
+        writer = SummaryWriter('runs/lcdi/'+model+learning_rate)
+        mean_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
+        log_diagonal_function = DeepSDF(in_channel, latent_size, out_channel).to(device=DEVICE)
+        low_rank_factor_function = DeepSDF(in_channel, latent_size, rank).to(device=DEVICE)
+        optimizer_mean = torch.optim.Adam(mean_function.parameters(), lr=lr)
+        parameters_all = [mean_function.parameters(), log_diagonal_function.parameters(),
+                          low_rank_factor_function.parameters()]
+        optimizer_all = torch.optim.Adam(itertools.chain(*parameters_all), lr=lr)
+        criterion = nn.BCEWithLogitsLoss(reduction="sum")
+        for t in range(pre_epochs + number_epochs):
+            train_low_rank(t, pre_epochs, gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
+                           optimizer_mean, optimizer_all, number_of_mc, coordinates, writer)
+        writer.close()
+        model_path = model+learning_rate+".pt"
+        torch.save({
+            'mean_function_state_dict': mean_function.state_dict(),
+            'log_diagonal_function_state_dict': log_diagonal_function.state_dict(),
+            'cov_factor_function_dict': low_rank_factor_function.state_dict(),
+            'optimizer_mean_state_dict': optimizer_mean.state_dict(),
+            'optimizer_all_state_dict': optimizer_all.state_dict(),
+        }, model_path)
 
-    for t in range(pre_epochs + number_epochs):
-        train_low_rank(t, pre_epochs, gt, mean_function, log_diagonal_function, low_rank_factor_function, criterion,
-                       optimizer_mean, optimizer_all, number_of_mc, coordinates, writer_deepsdf)
-        train_low_rank(t, pre_epochs, gt, mean_function_disc, log_diagonal_function_disc, low_rank_factor_function_disc,
-                       criterion, optimizer_mean_disc, optimizer_all_disc, number_of_mc, coordinates, writer_discrete)
-    writer_deepsdf.close()
-    writer_discrete.close()
-    model_path = "models.pt"
-    torch.save({
-        'mean_function_state_dict': mean_function.state_dict(),
-        'log_diagonal_function_state_dict': log_diagonal_function.state_dict(),
-        'cov_factor_function_dict': low_rank_factor_function.state_dict(),
-        'mean_disc_state_dict': mean_function_disc.state_dict(),
-        'log_diagonal_disc_state_dict': log_diagonal_function_disc.state_dict(),
-        'cov_factor_disc_dict': low_rank_factor_function_disc.state_dict(),
-        'optimizer_mean_state_dict': optimizer_mean.state_dict(),
-        'optimizer_all_state_dict': optimizer_all.state_dict(),
-        'optimizer_mean_disc_state_dict': optimizer_mean_disc.state_dict(),
-        'optimizer_all_disc_state_dict': optimizer_all_disc.state_dict(),
-    }, model_path)
+    else:
+        print("wrong argument")
 
 
 if __name__ == '__main__':
