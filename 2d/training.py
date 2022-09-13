@@ -15,7 +15,7 @@ def train_low_rank(epoch, model, loss_function, optimizer, number_of_samples, co
         gts = torch.stack(gts)
         gts = gts.reshape(len(gts), batch_size, 16384)
         gts = gts.permute(1, 0, 2).to(device=DEVICE)
-        mean_vector = model(coords, image)[0]
+        mean_vector = model(coords, image)[0]metrics2.py
         low_rank_factor = model(coords, image)[1]
         log_prob = torch.zeros(batch_size, 4, number_of_samples).to(device=DEVICE)
         #losses = torch.zeros(batch_size)
