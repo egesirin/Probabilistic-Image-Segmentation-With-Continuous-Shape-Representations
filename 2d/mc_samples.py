@@ -36,7 +36,18 @@ def mc_sample_mean(mean, number_of_sample_per_gt):
     return mc_samples
 
 
-def mc_sample_cov_is_low_rank(mean, cov_factor, number_of_sample_per_gt):
+def mc_sample_cov_is_low_rank(mean, cov_factor, rank, number_of_sample_per_gt):
+    number_of_pixels = mean.size(1)
+    #rank = cov_factor.size(0)
+    #print(cov_factor.shape)
+    mc_samples = torch.rand(number_of_sample_per_gt, number_of_pixels)
+    for i in range(number_of_sample_per_gt):
+        sample_p = torch.normal(0, 1, size=(rank,)).to(torch.float32).cuda()
+        mc_samples[i] = (cov_factor.T @ sample_p) + mean.view(-1)
+    #mc_samples = mc_samples.permute((1, 0, 2))
+    return mc_samples
+
+def mc_sample_cov_is_low_rank2(mean, cov_factor, number_of_sample_per_gt):
     number_of_pixels = mean.size(2)
     batch = mean.size(0)
     rank = cov_factor.size(1)
