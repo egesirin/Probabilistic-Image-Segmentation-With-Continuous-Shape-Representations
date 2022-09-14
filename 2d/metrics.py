@@ -1,5 +1,5 @@
 import torch
-from mc_samples import mc_sample_cov_is_low_rank
+from mc_samples import mc_sample_cov_is_low_rank2
 
 
 def iou(x, y, axis=-1):
@@ -24,7 +24,7 @@ def gen_energy_distance(im, gtss, model, coords, sample_num, DEVICE, batch):
         gtss = gtss.to(dtype=torch.long)
         mean_vector = model(coords, im)[0]
         low_rank_factor = model(coords, im)[1]
-        samples = mc_sample_cov_is_low_rank(mean_vector, low_rank_factor, sample_num).to(device=DEVICE)
+        samples = mc_sample_cov_is_low_rank2(mean_vector, low_rank_factor, sample_num).to(device=DEVICE)
         samples = torch.round(torch.sigmoid(samples)).to(dtype=torch.long)
         eye = torch.eye(2)
         gt_dist = eye[gtss].to(dtype=bool)
