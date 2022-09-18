@@ -20,7 +20,7 @@ def train(epoch, iterations_per_epoch, model, model_type, loss_function, optimiz
             writer.add_scalar('Training/Ged', ged.item(), global_step=global_step)
             writer.add_scalar('Training/Cross', cross.item(), global_step=global_step)
             writer.add_scalar('Training/Sample Diversity', sample_diversity.item(), global_step=global_step)
-            writer.add_scalar('Training/GTs Diversity', loss.item(), global_step=global_step)
+            writer.add_scalar('Training/GTs Diversity', gts_diversity.item(), global_step=global_step)
     
     
 def validation(epoch, iterations_per_epoch, model, model_type, loss_function, number_of_samples_per_gt,
@@ -37,5 +37,5 @@ def validation(epoch, iterations_per_epoch, model, model_type, loss_function, nu
             writer.add_scalar('Validation/Ged', ged.item(), global_step=global_step)
             writer.add_scalar('Validation/Cross', cross.item(), global_step=global_step)
             writer.add_scalar('Validation/Sample Diversity', sample_diversity.item(), global_step=global_step)
-            writer.add_scalar('Validation/GTs Diversity', loss.item(), global_step=global_step)
+            writer.add_scalar('Validation/GTs Diversity', gts_diversity.item(), global_step=global_step)
    
