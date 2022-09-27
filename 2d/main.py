@@ -48,6 +48,11 @@ def main():
               number_of_val_sample, coordinates, train_dataloader, batch_size, DEVICE, writer)
         validation(t, iterations_per_epoch_validation, models, model_type, criterion, number_of_mc_sample,
                    number_of_val_sample, coordinates, validation_dataloader, batch_size, DEVICE, writer)
+        model_path = model_type +'_Epoch_' + str(t) + ".pt"
+        torch.save({
+            'models': models.state_dict(),
+            'optimizer_mean_state_dict': optimizers.state_dict(),
+        }, model_path)
 
     writer.close()
 
