@@ -2,26 +2,18 @@ import torch
 from typing import Iterable
 from distribution_components import distribution_components
 
-
-def get_coordinates(image_shape: Iterable[int], batch, upsampling_factor, downsampling_factor) -> torch.Tensor:
-    if upsampling_factor == 1 and downsampling_factor == 1:
-        individual_voxel_ids = [torch.arange(num_elements) for num_elements in image_shape]
-
-    elif upsampling_factor > 1 and downsampling_factor == 1:
-        image_shape = [num_elements * upsampling_factor for num_elements in image_shape]
-        individual_voxel_ids = [torch.arange(num_elements - 1) for num_elements in image_shape]
-        individual_voxel_ids = [el / upsampling_factor for el in individual_voxel_ids]
-    elif upsampling_factor == 1 and downsampling_factor > 1:
-        num_elements = [int(num_elements / downsampling_factor) for num_elements in image_shape]
-        individual_voxel_ids = [torch.linspace(0, x - 1, num_elements[(image_shape.index(x))]) for x in image_shape]
-    else:
-        raise NotImplementedError
+def get_coordinates(image_shape: Iterable[int], batch, factor) -> torch.Tensor:
+    image_shape *= factor
+    image_shape = torch.round(image_shape).to(torch.int32)
+    individual_voxel_ids = [torch.arange(num_elements) for num_elements in image_shape]
     individual_voxel_ids_meshed = torch.meshgrid(individual_voxel_ids, indexing='ij')
     voxel_ids = torch.stack(individual_voxel_ids_meshed, -1)
+    voxel_ids = 2 * (voxel_ids + 0.5) / image_shape - 1
     voxel_ids = voxel_ids.reshape(-1, voxel_ids.shape[-1])
     voxel_ids = voxel_ids.repeat(batch, 1, 1)
     voxel_ids = voxel_ids.to(torch.float32)
     return voxel_ids
+
 
 
 def mc_sample_type_m(mean, number_of_sampl):

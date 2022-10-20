@@ -3,6 +3,15 @@ import math
 from mc_samples import sampling
 
 
+def dice_score(gts, samples, axis=-1):
+    samples = torch.round(torch.sigmoid(samples)).to(dtype=torch.long)
+    gts = gts.to(dtype=torch.long)
+    dice_ = (2*(gts & samples).sum(axis)) / (gts.sum(axis) + samples.sum(axis))
+    dice_[torch.isnan(dice_)] = 1.
+    dice = torch.mean(dice_)
+    return dice
+
+
 def iou(x, y, axis=-1):
     iou_ = (x & y).sum(axis) / (x | y).sum(axis)
     iou_[torch.isnan(iou_)] = 1.
@@ -40,7 +49,7 @@ def gen_energy_distance(gts, samples, batch):
     return cross, gts_diversity, sample_diversity
 
 
-def metrics(im, gt, model, model_type, loss_function, number_of_samples_per_gt, num_of_val_sample,
+def loss_func(im, gt, model, model_type, loss_function, number_of_samples_per_gt,
             coords, batch_size, DEVICE):
     image = im.to(device=DEVICE)
     gts = torch.stack(gt)
@@ -56,11 +65,22 @@ def metrics(im, gt, model, model_type, loss_function, number_of_samples_per_gt, 
     batch_losses = ((-torch.logsumexp(log_prob, dim=1)) + math.log(number_of_samples_per_gt))
     # Now, I don't have to take mean over the number of ground truths, then over batches. It is the same result!
     loss = torch.mean(batch_losses)  # without for loop <3
-    with torch.no_grad():
-        mc_for_ged = sampling(model(coords, image), model_type, num_of_val_sample)
-    cross, gts_diversity, sample_diversity = gen_energy_distance(gts, mc_for_ged, batch_size)
-    ged = 2 * cross - gts_diversity - sample_diversity
     del mc_samples
     del gts
     del image
-    return loss, ged, cross, gts_diversity, sample_diversity
+    return loss
+
+
+def metrics_val(im, gt, model,  model_type, num_of_val_sample, coords, batch_size, DEVICE):
+    image = im.to(device=DEVICE)
+    gts = torch.stack(gt)
+    gts = gts.reshape(len(gts), batch_size, -1)
+    gts = gts.permute(1, 0, 2).to(device=DEVICE)  # torch.Size([batch, #ground_truths, #pixels])
+    mc_for_ged = sampling(model(coords, image), model_type, num_of_val_sample)
+    mc_for_dice = mc_for_ged[:, :4]
+    dice = dice_score(gts, mc_for_dice)
+    cross, gts_diversity, sample_diversity = gen_energy_distance(gts, mc_for_ged, batch_size)
+    ged = 2 * cross - gts_diversity - sample_diversity
+    del gts
+    del image
+    return ged, cross, gts_diversity, sample_diversity, dice

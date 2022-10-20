@@ -53,39 +53,43 @@ class ShapeNet128Vox_Low_Rank(nn.Module):
 
     def forward(self, p, x):
         functions_list = []
-        # x = x.unsqueeze(1)
+        #x = x.unsqueeze(1)
         p_features = p.transpose(1, -1)
+        #print(x.shape)
+
         p = p.unsqueeze(1)
         p = torch.cat([p + d for d in self.displacments], dim=1)  # (B,1,7,num_samples,3)
-        feature_0 = F.grid_sample(x, p, align_corners=True)  # out : (B,C (of x), 1,1,sample_num)
+        #print(p.shape)
+        feature_0 = F.grid_sample(x, p, align_corners=False)  # out : (B,C (of x), 1,1,sample_num)
+        #print(feature_0.shape)
 
         net = self.actvn(self.conv_in(x))
         net = self.conv_in_bn(net)
-        feature_1 = F.grid_sample(net, p, align_corners=True)  # out : (B,C (of x), 1,1,sample_num)
+        feature_1 = F.grid_sample(net, p, align_corners=False)  # out : (B,C (of x), 1,1,sample_num)
         net = self.maxpool(net)
 
         net = self.actvn(self.conv_0(net))
         net = self.actvn(self.conv_0_1(net))
         net = self.conv0_1_bn(net)
-        feature_2 = F.grid_sample(net, p, align_corners=True)  # out : (B,C (of x), 1,1,sample_num)
+        feature_2 = F.grid_sample(net, p, align_corners=False)  # out : (B,C (of x), 1,1,sample_num)
         net = self.maxpool(net)
 
         net = self.actvn(self.conv_1(net))
         net = self.actvn(self.conv_1_1(net))
         net = self.conv1_1_bn(net)
-        feature_3 = F.grid_sample(net, p, align_corners=True)  # out : (B,C (of x), 1,1,sample_num)
+        feature_3 = F.grid_sample(net, p, align_corners=False)  # out : (B,C (of x), 1,1,sample_num)
         net = self.maxpool(net)
 
         net = self.actvn(self.conv_2(net))
         net = self.actvn(self.conv_2_1(net))
         net = self.conv2_1_bn(net)
-        feature_4 = F.grid_sample(net, p, align_corners=True)
+        feature_4 = F.grid_sample(net, p, align_corners=False)
         net = self.maxpool(net)
 
         net = self.actvn(self.conv_3(net))
         net = self.actvn(self.conv_3_1(net))
         net = self.conv3_1_bn(net)
-        feature_5 = F.grid_sample(net, p, align_corners=True)
+        feature_5 = F.grid_sample(net, p, align_corners=False)
 
         # here every channel corresponse to one feature.
 
