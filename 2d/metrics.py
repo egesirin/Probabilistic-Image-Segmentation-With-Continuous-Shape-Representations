@@ -3,13 +3,21 @@ import math
 from mc_samples import sampling
 
 
-def dice_score(gts, samples, axis=-1):
+def dice_score(gts, samples, axis=-1, ignore_empty_slices: bool = True):
+    """Return the sum of dice scores in this batch."""
     samples = torch.round(torch.sigmoid(samples)).to(dtype=torch.long)
     gts = gts.to(dtype=torch.long)
     dice_ = (2*(gts & samples).sum(axis)) / (gts.sum(axis) + samples.sum(axis))
-    dice_[torch.isnan(dice_)] = 1.
-    dice = torch.mean(dice_)
-    return dice
+    dice_[torch.isnan(dice_)] = 1.  # [batch, num_mc_samples]
+    if ignore_empty_slices:
+        are_slices_empty = torch.all(gts == 0, dim=axis)  # [batch, num_mc_samples]
+        are_slices_not_empty = torch.logical_not(are_slices_empty)  # 1 = not-empty, 0 = empty
+        num_slices_considered = are_slices_not_empty.sum()
+        dice = (dice_ * are_slices_not_empty).sum()
+    else:
+        num_slices_considered = dice_.numel()
+        dice = torch.sum(dice_)
+    return dice, num_slices_considered
 
 
 def iou(x, y, axis=-1):
@@ -78,9 +86,12 @@ def metrics_val(im, gt, model,  model_type, num_of_val_sample, coords, batch_siz
     gts = gts.permute(1, 0, 2).to(device=DEVICE)  # torch.Size([batch, #ground_truths, #pixels])
     mc_for_ged = sampling(model(coords, image), model_type, num_of_val_sample)
     mc_for_dice = mc_for_ged[:, :4]
-    dice = dice_score(gts, mc_for_dice)
+    dice_nod, num_slices_nod = dice_score(gts, mc_for_dice, -1, True)
+    dice, num_slices = dice_score(gts, mc_for_dice, -1, False)
     cross, gts_diversity, sample_diversity = gen_energy_distance(gts, mc_for_ged, batch_size)
     ged = 2 * cross - gts_diversity - sample_diversity
+    del mc_for_dice
+    del mc_for_ged
     del gts
     del image
-    return ged, cross, gts_diversity, sample_diversity, dice
+    return ged, cross, gts_diversity, sample_diversity, dice_nod, num_slices_nod, dice, num_slices

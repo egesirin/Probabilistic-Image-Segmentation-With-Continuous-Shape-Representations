@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from distribution_components import DistributionComponents
 
-
 class ShapeNet128Vox_Low_Rank(nn.Module):
     def __init__(self, rank, type, hidden_dim=256):
         super(ShapeNet128Vox_Low_Rank, self).__init__()
